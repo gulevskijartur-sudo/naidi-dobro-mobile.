@@ -22,6 +22,11 @@ export const TASK_CATEGORIES = [
 
 export type TaskCategory = (typeof TASK_CATEGORIES)[number];
 
+export interface TaskCoordinates {
+  latitude: number;
+  longitude: number;
+}
+
 export interface HelpTask {
   id: string;
   title: string;
@@ -30,12 +35,12 @@ export interface HelpTask {
   location: string;
   district: string;
   duration: string;
-  mapX: number;
-  mapY: number;
+  latitude: number | null;
+  longitude: number | null;
   isDemo: boolean;
 }
 
-export interface NewTaskInput {
+export interface NewTaskInput extends TaskCoordinates {
   title: string;
   description: string;
   category: TaskCategory;
@@ -62,6 +67,14 @@ interface AppStateValue extends PersistedState {
 
 const STORAGE_KEY = '@naydi-dobro/demo-v1';
 
+const LEGACY_DEMO_COORDINATES: Record<string, TaskCoordinates> = {
+  'demo-1': { latitude: 45.0441, longitude: 41.9692 },
+  'demo-2': { latitude: 45.0278, longitude: 41.9294 },
+  'demo-3': { latitude: 45.0642, longitude: 41.9511 },
+  'demo-4': { latitude: 45.0781, longitude: 41.9848 },
+  'demo-5': { latitude: 45.0396, longitude: 41.9783 },
+};
+
 const initialTasks: HelpTask[] = [
   {
     id: 'demo-1',
@@ -72,8 +85,7 @@ const initialTasks: HelpTask[] = [
     location: 'ул. Ленина, 212',
     district: 'Центр',
     duration: 'около 40 минут',
-    mapX: 27,
-    mapY: 28,
+    ...LEGACY_DEMO_COORDINATES['demo-1'],
     isDemo: true,
   },
   {
@@ -85,8 +97,7 @@ const initialTasks: HelpTask[] = [
     location: 'ул. Дзержинского, 155',
     district: 'Юго-Запад',
     duration: 'около 30 минут',
-    mapX: 70,
-    mapY: 25,
+    ...LEGACY_DEMO_COORDINATES['demo-2'],
     isDemo: true,
   },
   {
@@ -98,8 +109,7 @@ const initialTasks: HelpTask[] = [
     location: 'ул. Мира, 284',
     district: 'Северо-Запад',
     duration: 'около 1 часа',
-    mapX: 38,
-    mapY: 66,
+    ...LEGACY_DEMO_COORDINATES['demo-3'],
     isDemo: true,
   },
   {
@@ -111,8 +121,7 @@ const initialTasks: HelpTask[] = [
     location: 'пр-т Кулакова, 18',
     district: 'Северный',
     duration: 'около 1,5 часа',
-    mapX: 76,
-    mapY: 71,
+    ...LEGACY_DEMO_COORDINATES['demo-4'],
     isDemo: true,
   },
   {
@@ -124,8 +133,7 @@ const initialTasks: HelpTask[] = [
     location: 'ул. Пушкина, 34',
     district: 'Центр',
     duration: 'около 50 минут',
-    mapX: 52,
-    mapY: 44,
+    ...LEGACY_DEMO_COORDINATES['demo-5'],
     isDemo: true,
   },
 ];
@@ -134,6 +142,74 @@ const AppStateContext = createContext<AppStateValue | null>(null);
 
 function isTaskCategory(value: unknown): value is TaskCategory {
   return typeof value === 'string' && TASK_CATEGORIES.includes(value as TaskCategory);
+}
+
+function isValidCoordinates(latitude: unknown, longitude: unknown): boolean {
+  return (
+    typeof latitude === 'number' &&
+    Number.isFinite(latitude) &&
+    latitude >= -90 &&
+    latitude <= 90 &&
+    typeof longitude === 'number' &&
+    Number.isFinite(longitude) &&
+    longitude >= -180 &&
+    longitude <= 180
+  );
+}
+
+function normalizePersistedTask(value: unknown): HelpTask {
+  if (!value || typeof value !== 'object') {
+    throw new Error('Сохранённые задания имеют неверный формат.');
+  }
+
+  const task = value as Record<string, unknown>;
+  if (
+    typeof task.id !== 'string' ||
+    typeof task.title !== 'string' ||
+    typeof task.description !== 'string' ||
+    !isTaskCategory(task.category) ||
+    typeof task.location !== 'string' ||
+    typeof task.district !== 'string' ||
+    typeof task.duration !== 'string' ||
+    typeof task.isDemo !== 'boolean'
+  ) {
+    throw new Error('Сохранённые задания имеют неверный формат.');
+  }
+
+  let latitude: number | null;
+  let longitude: number | null;
+  if (task.latitude === undefined && task.longitude === undefined) {
+    // Older saved tasks used decorative map percentages, not real coordinates.
+    // Migrate only the known seeded examples; leave other legacy tasks unpinned.
+    const legacyCoordinates = LEGACY_DEMO_COORDINATES[task.id];
+    latitude = legacyCoordinates?.latitude ?? null;
+    longitude = legacyCoordinates?.longitude ?? null;
+  } else if (task.latitude === null && task.longitude === null) {
+    latitude = null;
+    longitude = null;
+  } else if (
+    typeof task.latitude === 'number' &&
+    typeof task.longitude === 'number' &&
+    isValidCoordinates(task.latitude, task.longitude)
+  ) {
+    latitude = task.latitude;
+    longitude = task.longitude;
+  } else {
+    throw new Error('Сохранённые задания имеют неверный формат координат.');
+  }
+
+  return {
+    id: task.id,
+    title: task.title,
+    description: task.description,
+    category: task.category,
+    location: task.location,
+    district: task.district,
+    duration: task.duration,
+    latitude,
+    longitude,
+    isDemo: task.isDemo,
+  };
 }
 
 function readPersistedState(raw: string): PersistedState {
@@ -151,40 +227,12 @@ function readPersistedState(raw: string): PersistedState {
     throw new Error('Не удалось прочитать сохранённые данные.');
   }
 
-  const tasks = value.tasks as unknown[];
-  if (
-    tasks.some(
-      (task) =>
-        !task ||
-        typeof task !== 'object' ||
-        !('id' in task) ||
-        typeof task.id !== 'string' ||
-        !('title' in task) ||
-        typeof task.title !== 'string' ||
-        !('description' in task) ||
-        typeof task.description !== 'string' ||
-        !('category' in task) ||
-        !isTaskCategory(task.category) ||
-        !('location' in task) ||
-        typeof task.location !== 'string' ||
-        !('district' in task) ||
-        typeof task.district !== 'string' ||
-        !('duration' in task) ||
-        typeof task.duration !== 'string' ||
-        !('mapX' in task) ||
-        typeof task.mapX !== 'number' ||
-        !('mapY' in task) ||
-        typeof task.mapY !== 'number' ||
-        !('isDemo' in task) ||
-        typeof task.isDemo !== 'boolean',
-    ) ||
-    value.joinedTaskIds.some((id) => typeof id !== 'string')
-  ) {
+  if (value.joinedTaskIds.some((id) => typeof id !== 'string')) {
     throw new Error('Сохранённые задания имеют неверный формат.');
   }
 
   return {
-    tasks: tasks as HelpTask[],
+    tasks: value.tasks.map(normalizePersistedTask),
     joinedTaskIds: value.joinedTaskIds as string[],
     role: value.role,
   };
@@ -282,17 +330,18 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const addTask = useCallback((input: NewTaskInput) => {
-    const count = tasks.length;
+    if (!isValidCoordinates(input.latitude, input.longitude)) {
+      throw new Error('Выберите точку задания на карте.');
+    }
+
     const task: HelpTask = {
       ...input,
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-      mapX: 18 + ((count * 19) % 65),
-      mapY: 21 + ((count * 23) % 59),
       isDemo: true,
     };
     setTasks((current) => [task, ...current]);
     return task;
-  }, [tasks.length]);
+  }, []);
 
   const toggleResponse = useCallback((taskId: string) => {
     setJoinedTaskIds((current) =>

@@ -12,13 +12,19 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { KeyboardAwareScrollViewCompat } from '@/components/KeyboardAwareScrollViewCompat';
+import OpenMapView from '@/components/OpenMapView';
 import {
   CategoryChip,
   PrimaryButton,
   tapFeedback,
 } from '@/components/AppUI';
 import { useColors } from '@/hooks/useColors';
-import { TASK_CATEGORIES, useAppState, type TaskCategory } from '@/state/AppState';
+import {
+  TASK_CATEGORIES,
+  useAppState,
+  type TaskCategory,
+  type TaskCoordinates,
+} from '@/state/AppState';
 
 export default function AddTaskScreen() {
   const colors = useColors();
@@ -31,6 +37,7 @@ export default function AddTaskScreen() {
   const [location, setLocation] = useState('');
   const [district, setDistrict] = useState('');
   const [duration, setDuration] = useState('');
+  const [coordinates, setCoordinates] = useState<TaskCoordinates | null>(null);
   const [validationError, setValidationError] = useState('');
 
   useEffect(() => {
@@ -48,6 +55,11 @@ export default function AddTaskScreen() {
       setValidationError('Заполните все поля, чтобы опубликовать задание.');
       return;
     }
+    if (!coordinates) {
+      setValidationError('Отметьте место встречи на карте.');
+      return;
+    }
+
     const task = addTask({
       title: title.trim(),
       description: description.trim(),
@@ -55,6 +67,7 @@ export default function AddTaskScreen() {
       location: location.trim(),
       district: district.trim(),
       duration: duration.trim(),
+      ...coordinates,
     });
     tapFeedback();
     router.replace(`/task/${task.id}`);
@@ -154,6 +167,36 @@ export default function AddTaskScreen() {
             maxLength={60}
           />
 
+          <View style={styles.mapSection}>
+            <FieldLabel title="Место встречи на карте" colors={colors} />
+            <Text style={[styles.mapHint, { color: colors.mutedForeground }]}>
+              Коснитесь карты, чтобы поставить точку. Её можно переместить повторным нажатием.
+            </Text>
+            <OpenMapView
+              mode="pick"
+              onCoordinatePick={(point) => {
+                setCoordinates(point);
+                setValidationError('');
+              }}
+              style={[styles.mapPicker, { backgroundColor: colors.card, borderColor: colors.border }]}
+            />
+            <View style={[styles.coordinateRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Ionicons
+                name={coordinates ? 'location' : 'location-outline'}
+                size={16}
+                color={coordinates ? colors.primary : colors.mutedForeground}
+              />
+              <Text style={[styles.coordinateText, { color: coordinates ? colors.foreground : colors.mutedForeground }]}>
+                {coordinates
+                  ? `${coordinates.latitude.toFixed(5)}°, ${coordinates.longitude.toFixed(5)}°`
+                  : 'Точка пока не выбрана'}
+              </Text>
+            </View>
+            <Text style={[styles.mapAttribution, { color: colors.mutedForeground }]}>
+              OpenFreeMap · данные © OpenStreetMap
+            </Text>
+          </View>
+
           <FieldLabel title="Примерное время" colors={colors} />
           <TextInput
             accessibilityLabel="Примерное время"
@@ -209,6 +252,20 @@ const styles = StyleSheet.create({
   input: { minHeight: 52, borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 13, fontFamily: 'Inter_400Regular', fontSize: 14 },
   multilineInput: { minHeight: 112, paddingTop: 14 },
   categories: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
+  mapSection: { gap: 7, marginTop: 4 },
+  mapHint: { fontFamily: 'Inter_400Regular', fontSize: 12, lineHeight: 17 },
+  mapPicker: { height: 250, borderRadius: 20, borderWidth: 1, marginTop: 3 },
+  coordinateRow: {
+    minHeight: 43,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+  },
+  coordinateText: { fontFamily: 'Inter_500Medium', fontSize: 12 },
+  mapAttribution: { fontFamily: 'Inter_400Regular', fontSize: 10, textAlign: 'right' },
   errorText: { fontFamily: 'Inter_500Medium', fontSize: 13, lineHeight: 18, marginTop: 3 },
   privacyNote: { fontFamily: 'Inter_400Regular', fontSize: 11, lineHeight: 16, textAlign: 'center' },
 });
